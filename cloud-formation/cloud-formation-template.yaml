@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Amazon Redshift ML'
+
+Parameters:
+  RedshiftClusterEndpoint:
+    Description: Redshift cluster endpoint including port number and database name.
+    Type: String
+    Default: democluster-5bd3e16b.cr5syyfjjfc0.us-east-1.redshift.amazonaws.com:5439/dev
+  DbUsername:
+    Description: Redshift database user name which has access to run SQL Script.
+    Type: String
+    AllowedPattern: "([a-z])([a-z]|[0-9])*"
+    Default: 'demo'
+  VPC:
+    Description: "vpc_id where redshift cluster is provisioned"
+    Type: AWS::EC2::VPC::Id
+    Default: 'vpc-0b4654ab18aca9c34'
+  VpcCidr:
+    Description: IP range (CIDR notation) for your VPC to access redshift clusters
+    Type: String
+    Default: 10.0.0.0/16
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: must be a valid IP CIDR range of the form x.x.x.x/x.
+  SubnetId:
+    Description: Subnet ID where source redshift clusters are created. Please make sure the private subnet is attached to NAT gateway.
+    Type: AWS::EC2::Subnet::Id
+    Default: 'subnet-01acde150d905f5b3'
+  IsPublicSubnet:
+    Description: Is the SubnetId mentioned above a public subnet?
+    Type: String
+    Default: 'No'
+    AllowedValues:
+    - 'Yes'
+    - 'No'
+  PreExistingS3BucketToGrantRedshiftAccess:
+    Description: The existing Amazon S3 bucket, which can be accessed by Redshift
+    Type: String
+    Default: 'redshift-ml-bikesharing-data'
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      -
+        Label:
+          default: Configurations from Redshift ML CloudFormation
+        Parameters:
+          - RedshiftClusterEndpoint
+          - DbUsername
+          - VPC
+          - VpcCidr
+          - SubnetId
+          - IsPublicSubnet
+          - PreExistingS3BucketToGrantRedshiftAccess
+          
+Conditions:
+  IsSubnetPublic:
+    Fn::Not:
+      - Fn::Equals:
+          - 'No'
+          - Ref: IsPublicSubnet
+  IsPreExistingS3Bucket:
+    Fn::Not:
+      - Fn::Equals:
+        - 'N/A'
+        - Ref: PreExistingS3BucketToGrantRedshiftAccess
+
+Resources:
+  SecurityGroupSageMakerNotebook:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: 'SageMaker Notebook security group'
+      SecurityGroupIngress:
+        - CidrIp: !Ref VpcCidr
+          Description : Allow inbound access on redshift port
+          IpProtocol: tcp
+          FromPort: 5439
+          ToPort:  5439
+      VpcId: !Ref VPC
+
+  SecurityGroupSelfReference:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Self Referencing Rule
+      FromPort: -1
+      IpProtocol: -1
+      GroupId: !GetAtt [SecurityGroupSageMakerNotebook, GroupId]
+      SourceSecurityGroupId: !GetAtt [SecurityGroupSageMakerNotebook, GroupId]
+      ToPort: -1
+
+  SagemakerNotebookIAMRole:
+    Type: AWS::IAM::Role
+    Properties :
+      AssumeRolePolicyDocument:
+        Version : 2012-10-17
+        Statement :
+          -
+            Effect : Allow
+            Principal :
+              Service :
+                - sagemaker.amazonaws.com
+            Action :
+              - sts:AssumeRole
+      Path : /
+      Policies:
+        - PolicyName: RedshiftMLPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - redshift-data:ExecuteStatement
+                  - redshift-data:ListStatements
+                  - redshift-data:GetStatementResult
+                  - redshift-data:DescribeStatement
+                Resource:
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - redshift:GetClusterCredentials
+                Resource:
+                  - !Sub
+                    - arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:cluster:${SourceRedshiftClusterIdentifier}
+                    - {SourceRedshiftClusterIdentifier: !Select [0, !Split [".", !Ref RedshiftClusterEndpoint]]}
+                  - !Sub
+                    - "arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:dbname:${SourceRedshiftClusterIdentifier}/${RedshiftDatabaseName}"
+                    - {SourceRedshiftClusterIdentifier: !Select [0, !Split [".", !Ref RedshiftClusterEndpoint]],RedshiftDatabaseName: !Select [1, !Split ["/", !Ref RedshiftClusterEndpoint]]}
+                  - !Sub
+                    - "arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:dbuser:${SourceRedshiftClusterIdentifier}/${DbUsername}"
+                    - {SourceRedshiftClusterIdentifier: !Select [0, !Split [".", !Ref RedshiftClusterEndpoint]]}
+  
+  RedshiftMLBucket:
+      Type: AWS::S3::Bucket
+      DeletionPolicy: Retain
+      UpdateReplacePolicy: Retain
+      Properties:
+        VersioningConfiguration:
+          Status: Enabled
+        AccessControl: Private      
+        BucketEncryption:
+          ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256  
+  
+  RedshiftMLIAMRole:
+    Type: AWS::IAM::Role
+    Properties :
+      AssumeRolePolicyDocument:
+        Version : 2012-10-17
+        Statement :
+          -
+            Effect : Allow
+            Principal :
+              Service :
+                - redshift.amazonaws.com
+                - sagemaker.amazonaws.com
+            Action :
+              - sts:AssumeRole
+      Path : /
+      RoleName: !Sub "${AWS::StackName}-RedshiftMLIAMRole-${AWS::AccountId}"
+      Policies:
+        - PolicyName: RedshiftMLIAMPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:BatchGetImage
+                  - ecr:GetAuthorizationToken
+                  - ecr:GetDownloadUrlForLayer
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:DescribeLogStreams
+                  - logs:PutLogEvents
+                  - sagemaker:*Job*
+
+                Resource:
+                  - '*'
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                  - s3:AbortMultipartUpload
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${RedshiftMLBucket}/*"
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/${AWS::StackName}-RedshiftMLIAMRole-${AWS::AccountId}"                  
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !Sub "arn:aws:s3:::${RedshiftMLBucket}" 
+              - Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource:
+                  - !If
+                    - IsPreExistingS3Bucket
+                    - !Sub "arn:aws:s3:::${PreExistingS3BucketToGrantRedshiftAccess}"
+                    - !Ref 'AWS::NoValue' 
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !If
+                    - IsPreExistingS3Bucket
+                    - !Sub "arn:aws:s3:::${PreExistingS3BucketToGrantRedshiftAccess}/*"
+                    - !Ref 'AWS::NoValue'      
+             
+  
+  LambdaInfraConfigIAMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description : IAM Role to setup infrastructure configurations
+      AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            -
+              Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+      Policies:
+          -
+            PolicyName: LambdaInvokePolicy
+            PolicyDocument :
+              Version: 2012-10-17
+              Statement:
+                -
+                  Effect: "Allow"
+                  Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - iam:PassRole
+                  - redshift:Describe*
+                  - ec2:Describe*
+                  Resource: "*"
+                -
+                  Effect: "Allow"
+                  Action:
+                  - redshift:ModifyClusterIamRoles
+                  - redshift:AuthorizeClusterSecurityGroupIngress,
+                  - redshift:RevokeClusterSecurityGroupIngress
+                  Resource:
+                    - !Sub
+                      - arn:aws:redshift:${AWS::Region}:${AWS::AccountId}:cluster:${SourceRedshiftClusterIdentifier}
+                      - {SourceRedshiftClusterIdentifier: !Select [0, !Split [".", !Ref RedshiftClusterEndpoint]]}
+                      
+
+  LambdaAddIamRoleToSourceRedshiftCluster:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: lambda to add iam role with access on simple replay S3 bucket to source redshift cluster
+      Handler: index.handler
+      Runtime: python3.6
+      Role: !GetAtt 'LambdaInfraConfigIAMRole.Arn'
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import traceback
+          import cfnresponse
+          def handler(event, context):
+              print(event)
+              client = boto3.client('redshift')
+              source_cluster = event['ResourceProperties']['Endpoint'].split('.')[0]
+              role = event['ResourceProperties']['RedshiftMLIAMRole']
+              try:
+                  if event['RequestType'] == 'Delete':
+                      response = client.modify_cluster_iam_roles(
+                          ClusterIdentifier=source_cluster,
+                          RemoveIamRoles=[role]
+                      
+                      )
+                      
+                  else:
+                      response = client.modify_cluster_iam_roles(
+                          ClusterIdentifier=source_cluster,
+                          AddIamRoles=[role]
+                      )
+              except:
+                  print(traceback.format_exc())
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {'Data': "failed"})
+                  raise
+              print(response)
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {'Data': 'finished'})
+
+  AddIamRoleToSourceRedshiftCluster:
+    Type: Custom::AddIamRoleToSourceRedshiftCluster
+    Properties:
+      ServiceToken: !GetAtt [LambdaAddIamRoleToSourceRedshiftCluster, Arn]
+      Endpoint: !Ref RedshiftClusterEndpoint
+      RedshiftMLIAMRole: !GetAtt RedshiftMLIAMRole.Arn
+      
+  NotebookInstance:
+    Type: "AWS::SageMaker::NotebookInstance"
+    Properties:
+      InstanceType: "ml.t3.medium"
+      RoleArn: !GetAtt SagemakerNotebookIAMRole.Arn
+      DirectInternetAccess: !If [IsSubnetPublic, "Enabled", "Disabled"]
+      DefaultCodeRepository: "https://github.com/aws-samples/getting-started-with-amazon-redshift-data-api.git"
+      RootAccess: Enabled
+      SecurityGroupIds:
+        - Ref: SecurityGroupSageMakerNotebook
+      SubnetId: !Ref SubnetId
+      VolumeSizeInGB: 20
+
+Outputs:
+  BucketName:
+    Value: !Ref RedshiftMLBucket
+  RoleArn:
+    Description: The ARN of the Redshift ML IAM role
+    Value: !GetAtt [RedshiftMLIAMRole, Arn]
+  NotebookInstance: 
+    Value: !Ref NotebookInstance
+  SagemakerSecurityGroup:
+    Value: !GetAtt [SagemakerNotebookIAMRole, Arn]
