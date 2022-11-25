@@ -8,7 +8,7 @@ Data engineers, data analysts, and big data developers are using real-time strea
 
 ## Repository Overview
 
-In this repository, we have showcase setting up Amazon Redshift Streaming Ingestion using [Amazon kinesis Data Streams} (https://aws.amazon.com/kinesis/data-streams/) and [Fully Managed Streaming for Apache Kafka](https://aws.amazon.com/msk/)
+In this repository, we have showcase setting up Amazon Redshift Streaming Ingestion using [Amazon kinesis Data Streams](https://aws.amazon.com/kinesis/data-streams/) and [Fully Managed Streaming for Apache Kafka](https://aws.amazon.com/msk/)
 
 We have also provided a [Cloudformation Template](./cloud-formation/cloud-formation-template.yaml) where applicable. 
 
@@ -23,9 +23,6 @@ Amazon Kinesis Data Streams is a scalable and durable real-time data streaming s
 
 ### What is Kafka/MSK?
 Apache Kafka is an open-source distributed event streaming platform used by thousands of companies for high-performance data pipelines, streaming analytics, data integration, and mission-critical applications. Managed Streaming for Kafka (MSK) is an AWS managed Apache Kafka platform. MSK allows customers to get up and running with Kafka without the need to manage resources or patching
-
-![How Redshift ML Works](./images/how-redshift-ml-works.png)
-
 
 ## Security
 
