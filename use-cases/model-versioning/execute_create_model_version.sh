@@ -1,0 +1,1 @@
+rsql -D redshiftuser --file=model_version.txt
