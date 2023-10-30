@@ -12,6 +12,7 @@ Before running the scripts, we need to create the schema and the table needed to
 model command for the model version. Run the following sql commands 
 
 ## Create the table to contain the metadata needed to auto-generate the create model command:
+```sql
 create table local_inf_ml_model_components
 (model_name varchar(500),
 schema_name varchar(500),
@@ -22,7 +23,7 @@ target_column varchar(50),
 returns_data_type varchar(50),
 model_arn varchar (500),
 S3_Bucket varchar (200) );
-
+```
 ## Initialize the local_inf_ml_components table.
 Note that you will just need to initialize this table once, with the model name, schema name,
 the data type of the target value we are predicting, the Amazon Resource Name (ARN) of the
