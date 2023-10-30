@@ -29,6 +29,7 @@ Note that you will just need to initialize this table once, with the model name,
 the data type of the target value we are predicting, the Amazon Resource Name (ARN) of the
 IAM role, and the S3 bucket to be used for the Redshift ML artifacts. The table will get updated
 with the additional data needed as part of the automation script:
+```sql
 insert into local_inf_ml_model_components
 values
 (
@@ -37,11 +38,12 @@ values
 ' ',' ',' ',' ','float8',
 '<arn of your IAM ROLE>'
 '<your S3 Bucket>)';
-
+```
 
 ## Execute script step1_create_model_version.sh to create a version of your model
 The contents of the step1_create_model_version.sh script is also shown in the following
 code snippet. As you can see, it calls other scripts and commands as follows:
+```sql
 #! /bin/bash
 create SHOW MODEL sql command
 ./generate_show_model_sql.sh '<<your model name>>' 
@@ -55,6 +57,7 @@ generate sql to create model version
 ./generate_create_model_version_sql.sh
 execute the sql to create model verson
 ./execute_create_model_version.sh
+```
 
 # Instructions to run scripts
 
@@ -64,10 +67,12 @@ on some setup steps.
 
 ## Creating the show_model_sqlcommand
 We have a simple script called generate_show_model_sql.sh with code as shown here:
+```sql
 #!/bin/bash
 modelname=$1
 echo $1
 echo SHOW MODEL $1 ';' > show_model.sql
+```
 This script takes as input the model name. In the script provided, we have already supplied the model
 name in the step1_create_model_version.sh driver script. You can modify this as needed
 for your models.
